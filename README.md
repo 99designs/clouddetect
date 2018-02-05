@@ -1,5 +1,7 @@
 # clouddetect
 
+[![](https://godoc.org/github.com/99designs/clouddetect?status.svg)](http://godoc.org/github.com/99designs/clouddetect)
+
 Go package to determine if an IP address resolves to one of the major cloud providers. Helpful for risk-scoring potential bot traffic in conjunction with other signals such as User Agent.
 
 ## API usage
