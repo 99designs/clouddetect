@@ -39,3 +39,6 @@ then
 - [ ] Digital Ocean
 - [x] Extra metadata like region/service etc
 
+## LICENSE
+
+[MIT](/LICENSE) 2018 99designs
