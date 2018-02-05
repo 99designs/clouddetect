@@ -32,9 +32,10 @@ then
 
 ## TODO
 
-- [ ] AWS
+- [x] AWS
 - [ ] GCP
 - [ ] Azure
 - [ ] Persistent client with caching
 - [ ] Digital Ocean
+- [ ] Extra metadata like region/service etc
 
