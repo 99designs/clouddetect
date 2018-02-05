@@ -37,7 +37,7 @@ then
 - [x] AWS
 - [x] GCP
 - [x] Azure
-- [ ] Persistent client with caching
+- [x] Persistent client with caching
 - [x] Extra metadata like region/service etc
 
 ## LICENSE

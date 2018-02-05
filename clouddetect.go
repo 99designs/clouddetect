@@ -7,13 +7,21 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"sync"
+	"time"
 
 	"golang.org/x/net/html"
 )
 
 // Client will eventually hold cache of IP ranges
 type Client struct {
-	foo int // unexported nothing
+	// unexported cache storage
+	subnetCache    []*Response
+	cacheWriteTime time.Time
+	cacheMutex     *sync.Mutex
+
+	// Time to keep IP ranges cached for (default 12 hours)
+	TTL time.Duration
 }
 
 // Response provides details of the cloud environment the IP resolved to
@@ -37,9 +45,22 @@ const (
 	ProviderMicrosoft = "Microsoft Azure"
 )
 
+// NewClient generates a Client with specified cache TTL
+func NewClient(TTL time.Duration) *Client {
+	return &Client{
+		TTL:        TTL,
+		cacheMutex: &sync.Mutex{},
+	}
+}
+
+var defaultClient *Client
+
 // DefaultClient is the default Client for resolving requests
 func DefaultClient() *Client {
-	return &Client{}
+	if defaultClient == nil {
+		defaultClient = NewClient(12 * time.Hour)
+	}
+	return defaultClient
 }
 
 // Resolve is a convenience function to resolve an IP against the DefaultClient
@@ -48,27 +69,32 @@ func Resolve(ip net.IP) (*Response, error) {
 }
 
 func (c *Client) allSubnetsForProviders() ([]*Response, error) {
-	allSubnets := []*Response{}
+	c.cacheMutex.Lock()
+	if c.subnetCache == nil || c.cacheWriteTime.Add(c.TTL).Before(time.Now()) {
+		c.subnetCache = []*Response{}
 
-	amazon, err := getAmazonCIDRs()
-	if err != nil {
-		return nil, err
+		amazon, err := getAmazonCIDRs()
+		if err != nil {
+			return nil, err
+		}
+		c.subnetCache = append(c.subnetCache, amazon...)
+
+		google, err := getGoogleCIDRs()
+		if err != nil {
+			return nil, err
+		}
+		c.subnetCache = append(c.subnetCache, google...)
+
+		microsoft, err := getMicrosoftCIDRs()
+		if err != nil {
+			return nil, err
+		}
+		c.subnetCache = append(c.subnetCache, microsoft...)
+		c.cacheWriteTime = time.Now()
 	}
-	allSubnets = append(allSubnets, amazon...)
+	c.cacheMutex.Unlock()
 
-	google, err := getGoogleCIDRs()
-	if err != nil {
-		return nil, err
-	}
-	allSubnets = append(allSubnets, google...)
-
-	microsoft, err := getMicrosoftCIDRs()
-	if err != nil {
-		return nil, err
-	}
-	allSubnets = append(allSubnets, microsoft...)
-
-	return allSubnets, nil
+	return c.subnetCache, nil
 }
 
 // Resolve will take the given ip and determine if it exists within any of the major
