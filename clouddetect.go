@@ -6,8 +6,9 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"os"
 	"regexp"
+
+	"golang.org/x/net/html"
 )
 
 // Client will eventually hold cache of IP ranges
@@ -188,20 +189,59 @@ type azureIPRange struct {
 	Subnet string `xml:"Subnet,attr"`
 }
 
+var azureXMLFileRegexp = regexp.MustCompile(`.*?PublicIPs.*?xml`)
+
 func resolveMicrosoft(ip net.IP) (string, error) {
+	downloadPage := "https://www.microsoft.com/en-us/download/confirmation.aspx?id=41653"
+	res, err := http.Get(downloadPage)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+
+	xmlURI := ""
+	doc := html.NewTokenizer(res.Body)
+	for {
+		e := doc.Next()
+		if e == html.StartTagToken {
+			tag := doc.Token()
+			if tag.Data == "a" {
+				for _, a := range tag.Attr {
+					if a.Key == "href" {
+						if azureXMLFileRegexp.Match([]byte(a.Val)) {
+							xmlURI = a.Val
+						}
+						break
+					}
+				}
+			}
+		}
+
+		if xmlURI != "" {
+			break
+		}
+	}
+
+	req, err := http.NewRequest("GET", xmlURI, nil)
+	if err != nil {
+		return "", err
+	}
+	for _, cookie := range res.Cookies() {
+		req.AddCookie(cookie)
+	}
+
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+
 	// 	<?xml version="1.0" encoding="utf-8"?>
 	// 	<AzurePublicIpAddresses xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	//   	<Region Name="australiaeast">
 	//     		<IpRange Subnet="13.70.64.0/18" />
-	f, err := os.Open("/Users/joho/Projects/99designs/go/src/github.com/99designs/clouddetect/PublicIPs_20180129.xml")
-	// if we os.Open returns an error then handle it
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-
 	azure := azureIPRanges{}
-	if err := xml.NewDecoder(f).Decode(&azure); err != nil {
+	if err := xml.NewDecoder(res.Body).Decode(&azure); err != nil {
 		return "", err
 	}
 	for _, region := range azure.Regions {

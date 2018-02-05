@@ -34,7 +34,7 @@ then
 
 - [x] AWS
 - [x] GCP
-- [ ] Azure
+- [x] Azure
 - [ ] Persistent client with caching
 - [ ] Digital Ocean
 - [ ] Extra metadata like region/service etc
