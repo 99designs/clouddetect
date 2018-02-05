@@ -51,19 +51,16 @@ func Resolve(ip net.IP) (*Response, error) {
 // cloud providers' published IP ranges and any extra metadata that may be of use.
 // It returns ErrNotCloudIP if the IP does not resolve against any lists
 func (c *Client) Resolve(ip net.IP) (*Response, error) {
-	region, err := resolveAmazon(ip)
+	match, err := resolveAmazon(ip)
 	if err != ErrNotCloudIP {
 		if err == nil {
-			return &Response{
-				ProviderName: ProviderAmazon,
-				Region:       region,
-			}, nil
+			return match, nil
 		}
 		return nil, err
 	}
 
 	// Azure
-	match, err := resolveMicrosoft(ip)
+	match, err = resolveMicrosoft(ip)
 	if err != ErrNotCloudIP {
 		if err == nil {
 			return match, nil
@@ -98,43 +95,63 @@ type amazonIPPrefixes struct {
 	} `json:"ipv6_prefixes"`
 }
 
-func resolveAmazon(ip net.IP) (string, error) {
+func getAmazonCIDRs() ([]*Response, error) {
 	ipPrefixes := amazonIPPrefixes{}
 
 	r, err := http.Get("https://ip-ranges.amazonaws.com/ip-ranges.json")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer r.Body.Close()
 
 	if err = json.NewDecoder(r.Body).Decode(&ipPrefixes); err != nil {
-		return "", err
+		return nil, err
 	}
 
-	if ip.To4() == nil {
-		// ipv6
-		for _, prefix := range ipPrefixes.Ipv6Prefixes {
-			_, ipNet, err := net.ParseCIDR(prefix.Ipv6Prefix)
-			if err != nil {
-				return "", err
-			}
-			if ipNet.Contains(ip) {
-				return prefix.Region, nil
-			}
+	responses := []*Response{}
+
+	for _, prefix := range ipPrefixes.Prefixes {
+		_, ipNet, err := net.ParseCIDR(prefix.IPPrefix)
+		if err != nil {
+			return nil, err
 		}
-	} else {
-		for _, prefix := range ipPrefixes.Prefixes {
-			_, ipNet, err := net.ParseCIDR(prefix.IPPrefix)
-			if err != nil {
-				return "", err
-			}
-			if ipNet.Contains(ip) {
-				return prefix.Region, nil
-			}
+		resp := &Response{
+			ProviderName: ProviderAmazon,
+			Region:       prefix.Region,
+			Subnet:       ipNet,
 		}
+		responses = append(responses, resp)
 	}
 
-	return "", ErrNotCloudIP
+	// ipv6
+	for _, prefix := range ipPrefixes.Ipv6Prefixes {
+		_, ipNet, err := net.ParseCIDR(prefix.Ipv6Prefix)
+		if err != nil {
+			return nil, err
+		}
+		resp := &Response{
+			ProviderName: ProviderAmazon,
+			Region:       prefix.Region,
+			Subnet:       ipNet,
+		}
+		responses = append(responses, resp)
+	}
+
+	return responses, nil
+}
+
+func resolveAmazon(ip net.IP) (*Response, error) {
+	ranges, err := getAmazonCIDRs()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, response := range ranges {
+		if response.Subnet.Contains(ip) {
+			return response, nil
+		}
+	}
+	return nil, ErrNotCloudIP
 }
 
 var domainRegexp = regexp.MustCompile(`include:([^\s]+)`)
