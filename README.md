@@ -17,8 +17,8 @@ import (
 )
 
 func main() {
-	ip := net.ParseIP("127.0.0.1")
-	if cloud, err := clouddetect.Resolve(ip); err == nil {
+    ip := net.ParseIP("127.0.0.1")
+    if cloud, err := clouddetect.Resolve(ip); err == nil {
         fmt.Println(cloud.ProviderName)
     }
 }
