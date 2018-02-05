@@ -175,20 +175,6 @@ func getAmazonCIDRs() ([]*Response, error) {
 	return responses, nil
 }
 
-func resolveAmazon(ip net.IP) (*Response, error) {
-	ranges, err := getAmazonCIDRs()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, response := range ranges {
-		if response.Subnet.Contains(ip) {
-			return response, nil
-		}
-	}
-	return nil, ErrNotCloudIP
-}
-
 var domainRegexp = regexp.MustCompile(`include:([^\s]+)`)
 var ipRegexp = regexp.MustCompile(`ip\d:([^\s]+)`)
 
@@ -229,20 +215,6 @@ func getGoogleCIDRs() ([]*Response, error) {
 		}
 	}
 	return ranges, nil
-}
-
-func resolveGoogle(ip net.IP) (*Response, error) {
-	ranges, err := getGoogleCIDRs()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, response := range ranges {
-		if response.Subnet.Contains(ip) {
-			return response, nil
-		}
-	}
-	return nil, ErrNotCloudIP
 }
 
 type azureIPRanges struct {
@@ -333,18 +305,4 @@ func getMicrosoftCIDRs() ([]*Response, error) {
 	}
 
 	return responses, nil
-}
-
-func resolveMicrosoft(ip net.IP) (*Response, error) {
-	ranges, err := getMicrosoftCIDRs()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, response := range ranges {
-		if response.Subnet.Contains(ip) {
-			return response, nil
-		}
-	}
-	return nil, ErrNotCloudIP
 }
