@@ -63,19 +63,16 @@ func (c *Client) Resolve(ip net.IP) (*Response, error) {
 	}
 
 	// Azure
-	region, err = resolveMicrosoft(ip)
+	match, err := resolveMicrosoft(ip)
 	if err != ErrNotCloudIP {
 		if err == nil {
-			return &Response{
-				ProviderName: ProviderMicrosoft,
-				Region:       region,
-			}, nil
+			return match, nil
 		}
 		return nil, err
 	}
 
 	// GCP
-	match, err := resolveGoogle(ip)
+	match, err = resolveGoogle(ip)
 	if err != ErrNotCloudIP {
 		if err == nil {
 			return match, nil
@@ -211,11 +208,11 @@ type azureIPRange struct {
 
 var azureXMLFileRegexp = regexp.MustCompile(`.*?PublicIPs.*?xml`)
 
-func resolveMicrosoft(ip net.IP) (string, error) {
+func getMicrosoftCIDRs() ([]*Response, error) {
 	downloadPage := "https://www.microsoft.com/en-us/download/confirmation.aspx?id=41653"
 	res, err := http.Get(downloadPage)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer res.Body.Close()
 
@@ -244,7 +241,7 @@ func resolveMicrosoft(ip net.IP) (string, error) {
 
 	req, err := http.NewRequest("GET", xmlURI, nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	for _, cookie := range res.Cookies() {
 		req.AddCookie(cookie)
@@ -252,7 +249,7 @@ func resolveMicrosoft(ip net.IP) (string, error) {
 
 	res, err = http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer res.Body.Close()
 
@@ -262,18 +259,40 @@ func resolveMicrosoft(ip net.IP) (string, error) {
 	//     		<IpRange Subnet="13.70.64.0/18" />
 	azure := azureIPRanges{}
 	if err := xml.NewDecoder(res.Body).Decode(&azure); err != nil {
-		return "", err
+		return nil, err
 	}
+
+	responses := []*Response{}
+
 	for _, region := range azure.Regions {
 		for _, v := range region.IPRanges {
 			_, net, err := net.ParseCIDR(v.Subnet)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
-			if net.Contains(ip) {
-				return region.Name, nil
+
+			response := &Response{
+				ProviderName: ProviderMicrosoft,
+				Region:       region.Name,
+				Subnet:       net,
 			}
+			responses = append(responses, response)
 		}
 	}
-	return "", ErrNotCloudIP
+
+	return responses, nil
+}
+
+func resolveMicrosoft(ip net.IP) (*Response, error) {
+	ranges, err := getMicrosoftCIDRs()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, response := range ranges {
+		if response.Subnet.Contains(ip) {
+			return response, nil
+		}
+	}
+	return nil, ErrNotCloudIP
 }
