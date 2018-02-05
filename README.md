@@ -4,6 +4,8 @@
 
 Go package to determine if an IP address resolves to one of the major cloud providers. Helpful for risk-scoring potential bot traffic in conjunction with other signals such as User Agent.
 
+Currently the library consumes the published IP ranges from Amazon, Google, and Microsoft.
+
 ## API usage
 
 ```
@@ -24,6 +26,8 @@ func main() {
 }
 ```
 
+The default `Client` has an internal cache with a TTL of 12 hours. The first request to resolve an IP will be slow as it fetches all published ranges. See the [clouddetect godocs](http://godoc.org/github.com/99designs/clouddetect) for more detail on the API.
+
 ## CLI usage
 
 `go get github.com/99designs/clouddetect/cli/clouddetect`
@@ -31,14 +35,6 @@ func main() {
 then
 
 `clouddetect -ip=127.0.0.1`
-
-## TODO
-
-- [x] AWS
-- [x] GCP
-- [x] Azure
-- [x] Persistent client with caching
-- [x] Extra metadata like region/service etc
 
 ## LICENSE
 
