@@ -5,37 +5,33 @@ import (
 	"testing"
 )
 
-func TestAmazonIP(t *testing.T) {
-	// 54.199.144.109 was an AWS japan EC2 ip
-	goodIP := net.ParseIP("54.199.144.109")
-	service, err := Resolve(goodIP)
-	if service.ProviderName != "Amazon Web Services" || err != nil {
-		t.Errorf("%v resolved incorrectly with %#v:%v", goodIP, service, err)
-	}
-}
+func TestDetect(t *testing.T) {
+	client := DefaultClient()
 
-func TestGoogleIP(t *testing.T) {
-	// Pulled 146.148.32.0/19 as a test example, expect this to be flaky
-	goodIP := net.ParseIP("146.148.34.2")
-	service, err := Resolve(goodIP)
-	if service.ProviderName != "Google Cloud" || err != nil {
-		t.Errorf("%v resolved incorrectly with %#v:%v", goodIP, service, err)
+	testCases := []struct {
+		providerName string
+		ip           string
+	}{
+		{ProviderAmazon, "54.199.144.109"},
+		{ProviderGoogle, "146.148.34.2"},
+		{ProviderMicrosoft, "168.61.66.2"},
 	}
-}
 
-func TestMicrosoftIP(t *testing.T) {
-	// Pulled 168.61.64.0/20 as a test example
-	goodIP := net.ParseIP("168.61.66.2")
-	service, err := Resolve(goodIP)
-	if err != nil || service.ProviderName != "Microsoft Azure" {
-		t.Errorf("%v resolved incorrectly with %#v:%v", goodIP, service, err)
+	for _, tc := range testCases {
+		t.Run(tc.providerName, func(t *testing.T) {
+			ip := net.ParseIP(tc.ip)
+			match, err := client.Resolve(ip)
+			if err != nil || match.ProviderName != tc.providerName {
+				t.Errorf("Expected %v to resolve to %v, got %#v:%#v", ip, tc.providerName, match, err)
+			}
+		})
 	}
-}
 
-func TestNoMatch(t *testing.T) {
-	badIP := net.ParseIP("127.0.0.1")
-	_, err := Resolve(badIP)
-	if err != ErrNotCloudIP {
-		t.Errorf("%v resolved incorrectly with %v", badIP, err)
-	}
+	t.Run("No Match", func(t *testing.T) {
+		badIP := net.ParseIP("127.0.0.1")
+		_, err := client.Resolve(badIP)
+		if err != ErrNotCloudIP {
+			t.Errorf("%v resolved incorrectly with %v", badIP, err)
+		}
+	})
 }

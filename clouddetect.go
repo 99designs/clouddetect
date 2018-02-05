@@ -47,34 +47,43 @@ func Resolve(ip net.IP) (*Response, error) {
 	return DefaultClient().Resolve(ip)
 }
 
+func (c *Client) allSubnetsForProviders() ([]*Response, error) {
+	allSubnets := []*Response{}
+
+	amazon, err := getAmazonCIDRs()
+	if err != nil {
+		return nil, err
+	}
+	allSubnets = append(allSubnets, amazon...)
+
+	google, err := getGoogleCIDRs()
+	if err != nil {
+		return nil, err
+	}
+	allSubnets = append(allSubnets, google...)
+
+	microsoft, err := getMicrosoftCIDRs()
+	if err != nil {
+		return nil, err
+	}
+	allSubnets = append(allSubnets, microsoft...)
+
+	return allSubnets, nil
+}
+
 // Resolve will take the given ip and determine if it exists within any of the major
 // cloud providers' published IP ranges and any extra metadata that may be of use.
 // It returns ErrNotCloudIP if the IP does not resolve against any lists
 func (c *Client) Resolve(ip net.IP) (*Response, error) {
-	match, err := resolveAmazon(ip)
-	if err != ErrNotCloudIP {
-		if err == nil {
-			return match, nil
-		}
+	subNets, err := c.allSubnetsForProviders()
+	if err != nil {
 		return nil, err
 	}
 
-	// Azure
-	match, err = resolveMicrosoft(ip)
-	if err != ErrNotCloudIP {
-		if err == nil {
-			return match, nil
+	for _, subNet := range subNets {
+		if subNet.Subnet.Contains(ip) {
+			return subNet, nil
 		}
-		return nil, err
-	}
-
-	// GCP
-	match, err = resolveGoogle(ip)
-	if err != ErrNotCloudIP {
-		if err == nil {
-			return match, nil
-		}
-		return nil, err
 	}
 
 	return nil, ErrNotCloudIP
