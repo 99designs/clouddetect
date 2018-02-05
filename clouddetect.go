@@ -2,9 +2,11 @@ package clouddetect
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 )
 
@@ -29,7 +31,7 @@ const (
 	// ProviderGoogle is Google Cloud
 	ProviderGoogle = "Google Cloud"
 	// ProviderMicrosft is Microsoft Azure
-	ProviderMicrosft = "Microsoft Azure"
+	ProviderMicrosoft = "Microsoft Azure"
 )
 
 // DefaultClient is the default Client for resolving requests
@@ -57,6 +59,15 @@ func (c *Client) Resolve(ip net.IP) (*Response, error) {
 	}
 
 	// Azure
+	_, err = resolveMicrosoft(ip)
+	if err != ErrNotCloudIP {
+		if err == nil {
+			return &Response{
+				ProviderName: ProviderMicrosoft,
+			}, nil
+		}
+		return nil, err
+	}
 
 	// GCP
 	match, err := resolveGoogle(ip)
@@ -162,4 +173,47 @@ func resolveGoogle(ip net.IP) (bool, error) {
 		}
 	}
 	return false, ErrNotCloudIP
+}
+
+type azureIPRanges struct {
+	Regions []azureRegion `xml:"Region"`
+}
+
+type azureRegion struct {
+	Name     string         `xml:"Name,attr"`
+	IPRanges []azureIPRange `xml:"IpRange"`
+}
+
+type azureIPRange struct {
+	Subnet string `xml:"Subnet,attr"`
+}
+
+func resolveMicrosoft(ip net.IP) (string, error) {
+	// 	<?xml version="1.0" encoding="utf-8"?>
+	// 	<AzurePublicIpAddresses xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	//   	<Region Name="australiaeast">
+	//     		<IpRange Subnet="13.70.64.0/18" />
+	f, err := os.Open("/Users/joho/Projects/99designs/go/src/github.com/99designs/clouddetect/PublicIPs_20180129.xml")
+	// if we os.Open returns an error then handle it
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	azure := azureIPRanges{}
+	if err := xml.NewDecoder(f).Decode(&azure); err != nil {
+		return "", err
+	}
+	for _, region := range azure.Regions {
+		for _, v := range region.IPRanges {
+			_, net, err := net.ParseCIDR(v.Subnet)
+			if err != nil {
+				return "", err
+			}
+			if net.Contains(ip) {
+				return region.Name, nil
+			}
+		}
+	}
+	return "", ErrNotCloudIP
 }

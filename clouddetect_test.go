@@ -23,6 +23,15 @@ func TestGoogleIP(t *testing.T) {
 	}
 }
 
+func TestMicrosoftIP(t *testing.T) {
+	// Pulled 168.61.64.0/20 as a test example
+	goodIP := net.ParseIP("168.61.66.2")
+	service, err := Resolve(goodIP)
+	if err != nil || service.ProviderName != "Microsoft Azure" {
+		t.Errorf("%v resolved incorrectly with %#v:%v", goodIP, service, err)
+	}
+}
+
 func TestNoMatch(t *testing.T) {
 	badIP := net.ParseIP("127.0.0.1")
 	_, err := Resolve(badIP)
