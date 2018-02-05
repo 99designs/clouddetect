@@ -38,7 +38,6 @@ then
 - [x] GCP
 - [x] Azure
 - [ ] Persistent client with caching
-- [ ] Digital Ocean
 - [x] Extra metadata like region/service etc
 
 ## LICENSE
