@@ -33,7 +33,7 @@ then
 ## TODO
 
 - [x] AWS
-- [ ] GCP
+- [x] GCP
 - [ ] Azure
 - [ ] Persistent client with caching
 - [ ] Digital Ocean
