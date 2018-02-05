@@ -37,5 +37,5 @@ then
 - [x] Azure
 - [ ] Persistent client with caching
 - [ ] Digital Ocean
-- [ ] Extra metadata like region/service etc
+- [x] Extra metadata like region/service etc
 

@@ -19,6 +19,7 @@ type Client struct {
 // Response provides details of the cloud environment the IP resolved to
 type Response struct {
 	ProviderName string
+	Region       string
 }
 
 var (
@@ -31,7 +32,7 @@ const (
 	ProviderAmazon = "Amazon Web Services"
 	// ProviderGoogle is Google Cloud
 	ProviderGoogle = "Google Cloud"
-	// ProviderMicrosft is Microsoft Azure
+	// ProviderMicrosoft is Microsoft Azure
 	ProviderMicrosoft = "Microsoft Azure"
 )
 
@@ -49,22 +50,24 @@ func Resolve(ip net.IP) (*Response, error) {
 // cloud providers' published IP ranges and any extra metadata that may be of use.
 // It returns ErrNotCloudIP if the IP does not resolve against any lists
 func (c *Client) Resolve(ip net.IP) (*Response, error) {
-	_, err := resolveAmazon(ip)
+	region, err := resolveAmazon(ip)
 	if err != ErrNotCloudIP {
 		if err == nil {
 			return &Response{
 				ProviderName: ProviderAmazon,
+				Region:       region,
 			}, nil
 		}
 		return nil, err
 	}
 
 	// Azure
-	_, err = resolveMicrosoft(ip)
+	region, err = resolveMicrosoft(ip)
 	if err != ErrNotCloudIP {
 		if err == nil {
 			return &Response{
 				ProviderName: ProviderMicrosoft,
+				Region:       region,
 			}, nil
 		}
 		return nil, err
