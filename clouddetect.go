@@ -20,6 +20,7 @@ type Client struct {
 type Response struct {
 	ProviderName string
 	Region       string
+	Subnet       *net.IPNet
 }
 
 var (
@@ -75,11 +76,9 @@ func (c *Client) Resolve(ip net.IP) (*Response, error) {
 
 	// GCP
 	match, err := resolveGoogle(ip)
-	if !match || err != ErrNotCloudIP {
+	if err != ErrNotCloudIP {
 		if err == nil {
-			return &Response{
-				ProviderName: ProviderGoogle,
-			}, nil
+			return match, nil
 		}
 		return nil, err
 	}
@@ -144,13 +143,13 @@ func resolveAmazon(ip net.IP) (string, error) {
 var domainRegexp = regexp.MustCompile(`include:([^\s]+)`)
 var ipRegexp = regexp.MustCompile(`ip\d:([^\s]+)`)
 
-func getGoogleCIDRs() ([]*net.IPNet, error) {
+func getGoogleCIDRs() ([]*Response, error) {
 	r, err := net.LookupTXT("_cloud-netblocks.googleusercontent.com")
 	if err != nil {
 		return nil, err
 	}
 
-	ranges := []*net.IPNet{}
+	ranges := []*Response{}
 
 	// TXT record returns result like:
 	// v=spf1 include:_cloud-netblocks1.googleusercontent.com include:_cloud-netblocks2.googleusercontent.com include:_cloud-netblocks3.googleusercontent.com include:_cloud-netblocks4.googleusercontent.com include:_cloud-netblocks5.googleusercontent.com ?all
@@ -170,7 +169,11 @@ func getGoogleCIDRs() ([]*net.IPNet, error) {
 					if err != nil {
 						return nil, err
 					}
-					ranges = append(ranges, net)
+					resp := &Response{
+						ProviderName: ProviderGoogle,
+						Subnet:       net,
+					}
+					ranges = append(ranges, resp)
 				}
 			}
 
@@ -179,18 +182,18 @@ func getGoogleCIDRs() ([]*net.IPNet, error) {
 	return ranges, nil
 }
 
-func resolveGoogle(ip net.IP) (bool, error) {
+func resolveGoogle(ip net.IP) (*Response, error) {
 	ranges, err := getGoogleCIDRs()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
-	for _, cidr := range ranges {
-		if cidr.Contains(ip) {
-			return true, nil
+	for _, response := range ranges {
+		if response.Subnet.Contains(ip) {
+			return response, nil
 		}
 	}
-	return false, ErrNotCloudIP
+	return nil, ErrNotCloudIP
 }
 
 type azureIPRanges struct {
