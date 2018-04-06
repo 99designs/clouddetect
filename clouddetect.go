@@ -24,10 +24,11 @@ type Client struct {
 	CacheFilePath string
 }
 
-// Response provides details of the cloud environment the IP resolved to
 type diskCache struct {
 	SubnetCache []*Response `json:"cache"`
 }
+
+// Response provides details of the cloud environment the IP resolved to
 type Response struct {
 	ProviderName string     `json:"providerName"`
 	Region       string     `json:"region"`
@@ -36,8 +37,8 @@ type Response struct {
 
 var (
 	// ErrNotCloudIP is error returned when IP does not match any of the published list of ranges
-	ErrNotCloudIP      = errors.New("not resolved to any known cloud IP range")
-	ErrCacheNotReady   = errors.New("subnet cache is still being downloaded")
+	ErrNotCloudIP = errors.New("not resolved to any known cloud IP range")
+	// ErrCacheFileLocked is returned when a RefreshCache call times out due to the presence of a lock file
 	ErrCacheFileLocked = errors.New("cache lock file exists, skipping cache refresh")
 )
 
@@ -81,36 +82,36 @@ func Resolve(ip net.IP) (*Response, error) {
 func (c *Client) Resolve(ip net.IP) (response *Response, err error) {
 	c.cacheMutex.RLock()
 	if len(c.subnetCache) == 0 || c.cacheWriteTime.Add(c.TTL).Before(time.Now()) {
+		isFirstRun := len(c.subnetCache) == 0
 		c.cacheMutex.RUnlock()
 
-		// Ensure future checks don't trigger subsequent refreshes
-		c.cacheMutex.Lock()
-		c.cacheWriteTime = time.Now()
-		c.cacheMutex.Unlock()
+		if isFirstRun {
+			// Synchronously refresh the cache
+			c.RefreshCache()
+		} else {
+			// Ensure future checks don't trigger subsequent refreshes
+			c.cacheMutex.Lock()
+			c.cacheWriteTime = time.Now()
+			c.cacheMutex.Unlock()
 
-		// Asynchronously refresh the cache because we already have subnets in memory
-		go c.RefreshCache()
+			// Asynchronously refresh the cache because we already have subnets in memory
+			go c.RefreshCache()
+		}
 	}
 
 	c.cacheMutex.RLock()
-	// Ensure cache refreshes above were successful
-	if len(c.subnetCache) == 0 {
-		c.cacheMutex.RUnlock()
-		return nil, ErrCacheNotReady
-	}
-
 	for _, subNet := range c.subnetCache {
 		if subNet.Subnet.Contains(ip) {
 			c.cacheMutex.RUnlock()
 			return subNet, nil
 		}
 	}
-
 	c.cacheMutex.RUnlock()
+
 	return nil, ErrNotCloudIP
 }
 
-// Refreshes the cloud provider subnet cache first form disk (if available) and then from the web
+// RefreshCache loads the cloud provider subnet data from disk (if available) and then from the web
 func (c *Client) RefreshCache() (err error) {
 	if c.CacheFilePath != "" {
 		// Always check the local cache first, it may have been updated by another process
@@ -195,7 +196,6 @@ func (c *Client) lockFilePath() (lfp string) {
 	return fmt.Sprintf("%s.lock", c.CacheFilePath)
 }
 
-// Refreshes the cloud provider subnet cache from the local cache file
 func (c *Client) refreshCacheFromDisk() (err error) {
 	f, err := os.OpenFile(c.CacheFilePath, os.O_RDONLY, os.ModePerm)
 	if err != nil {
@@ -225,7 +225,7 @@ func (c *Client) refreshCacheFromDisk() (err error) {
 	return nil
 }
 
-// The number of cloud provider subnets loaded in the cache
+// Count retruns the number of cloud provider subnets loaded in the cache
 func (c *Client) Count() (subnetCount int) {
 	return len(c.subnetCache)
 }
