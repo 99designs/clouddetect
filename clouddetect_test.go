@@ -189,3 +189,56 @@ func TestThatDeleteOldLockFileWorks(t *testing.T) {
 		t.Logf("Found %d subnet records and saved to disk in %d bytes.", len(client.subnetCache), size)
 	}
 }
+
+func TestThatRefreshCacheAsyncWorks(t *testing.T) {
+	tempFile, err := ioutil.TempFile(os.TempDir(), "clouddetect_test")
+	if err != nil {
+		t.Errorf("Could not create temp file for cache output: %v", err)
+		return
+	}
+	// last-in, first-out
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	client := DefaultClient()
+	client.CacheFilePath = tempFile.Name()
+
+	if err := client.RefreshCache(); err != nil {
+		t.Error(err)
+		return
+	}
+
+	if len(client.subnetCache) == 0 {
+		t.Error("client.subnetCache is empty, expected records.")
+		return
+	}
+
+	// Reset the cache refresh time, so it will asynchronously refresh
+	originalModTime := client.cacheWriteTime
+	client.cacheWriteTime = time.Time{}
+	if client.cacheRefreshInProgress {
+		t.Error("client.cacheRefreshInProgress is true, but cache has already been refreshed")
+		return
+	}
+
+	// Try to resolve an IP, which should trigger a cache refresh
+	time.Sleep(1 * time.Second) // ensure we will get different refresh timestamps
+	tc := testCases[0]
+	ip := net.ParseIP(tc.ip)
+	client.Resolve(ip)
+
+	start := time.Now()
+	for client.cacheRefreshInProgress {
+		time.Sleep(1 * time.Second)
+		if time.Since(start) > (30 * time.Second) {
+			t.Error("client.cacheRefreshInProgress is true after waiting 30 seconds")
+			return
+		}
+	}
+
+	if client.cacheWriteTime.After(originalModTime) {
+		t.Log("Successfully refreshed cache asynchronously as part of the client.Resolve() call")
+	} else {
+		t.Errorf("Asynchronously refreshed cache, but the cacheWriteTime (%v) is not more recent than originalModTime (%v)", client.cacheWriteTime, originalModTime)
+	}
+}

@@ -14,10 +14,11 @@ import (
 // Client will eventually hold cache of IP ranges
 type Client struct {
 	// unexported cache storage
-	subnetCache    []*Response
-	cacheWriteTime time.Time
-	cacheMutex     *sync.RWMutex
-	cacheSource    string
+	subnetCache            []*Response
+	cacheWriteTime         time.Time
+	cacheMutex             *sync.RWMutex
+	cacheSource            string
+	cacheRefreshInProgress bool
 
 	// Time to keep IP ranges cached for (default 12 hours)
 	TTL           time.Duration
@@ -113,9 +114,18 @@ func (c *Client) Resolve(ip net.IP) (response *Response, err error) {
 
 // RefreshCache loads the cloud provider subnet data from disk (if available) and then from the web
 func (c *Client) RefreshCache() (err error) {
+	c.cacheMutex.Lock()
+	c.cacheRefreshInProgress = true
+	c.cacheMutex.Unlock()
+	defer func() {
+		c.cacheMutex.Lock()
+		c.cacheRefreshInProgress = false
+		c.cacheMutex.Unlock()
+	}()
+
 	if c.CacheFilePath != "" {
 		// Always check the local cache first, it may have been updated by another process
-		if err = c.refreshCacheFromDisk(); err == nil {
+		if err = c.refreshCacheFromDisk(c.cacheWriteTime); err == nil {
 			if c.cacheWriteTime.Add(c.TTL).Before(time.Now()) {
 				// The local cache is still up to date
 				return nil
@@ -135,8 +145,8 @@ func (c *Client) RefreshCache() (err error) {
 			for start.Add(c.TTL).After(time.Now()) {
 				time.Sleep(5 * time.Second)
 				if _, err := os.Stat(c.lockFilePath()); os.IsNotExist(err) {
-					// Lock file has been removed, refresh the cache from disk
-					return c.refreshCacheFromDisk()
+					// Lock file has been removed, refresh the cache from disk, we pass time.Time{} to ensure we always use the disk data after a lock file is removed
+					return c.refreshCacheFromDisk(time.Time{})
 				}
 			}
 
@@ -196,12 +206,20 @@ func (c *Client) lockFilePath() (lfp string) {
 	return fmt.Sprintf("%s.lock", c.CacheFilePath)
 }
 
-func (c *Client) refreshCacheFromDisk() (err error) {
+func (c *Client) refreshCacheFromDisk(minModTime time.Time) (err error) {
 	f, err := os.OpenFile(c.CacheFilePath, os.O_RDONLY, os.ModePerm)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+
+	var modTime time.Time
+	if stat, err := f.Stat(); err != nil {
+		return err
+	} else if modTime = stat.ModTime(); minModTime.After(modTime) {
+		// The local disk cache needs to be refreshed too
+		return nil
+	}
 
 	data, err := ioutil.ReadAll(f)
 	if err != nil {
@@ -216,10 +234,10 @@ func (c *Client) refreshCacheFromDisk() (err error) {
 
 	c.cacheMutex.Lock()
 	c.subnetCache = cache.SubnetCache
-	if stat, err := f.Stat(); err == nil {
-		c.cacheWriteTime = stat.ModTime()
-	}
+	c.cacheWriteTime = modTime
 	c.cacheSource = cacheSourceDisk
+	// This is technically set twice by RefreshCache() and this method, but since we're writing cache data in this method, we should ensure this flag is accurate
+	c.cacheRefreshInProgress = false
 	c.cacheMutex.Unlock()
 
 	return nil
