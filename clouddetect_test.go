@@ -20,6 +20,11 @@ var (
 	}
 )
 
+func init() {
+	DefaultCacheRefreshTimeout = 10 * time.Second
+	logger.Enabled = false
+}
+
 func TestDetect(t *testing.T) {
 	client := DefaultClient()
 
@@ -43,7 +48,7 @@ func TestDetect(t *testing.T) {
 }
 
 func TestThatRefreshCacheToDiskWorks(t *testing.T) {
-	tempFile, err := ioutil.TempFile(os.TempDir(), "clouddetect_test")
+	tempFile, err := ioutil.TempFile(os.TempDir(), "clouddetect_test_refreshCacheToDisk")
 	if err != nil {
 		t.Errorf("Could not create temp file for cache output: %v", err)
 		return
@@ -52,7 +57,7 @@ func TestThatRefreshCacheToDiskWorks(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	defer tempFile.Close()
 
-	client := DefaultClient()
+	client := NewClient(12 * time.Hour)
 	client.CacheFilePath = tempFile.Name()
 
 	if err := client.RefreshCache(); err != nil {
@@ -88,7 +93,7 @@ func TestThatRefreshCacheToDiskWorks(t *testing.T) {
 }
 
 func TestThatMultiProcessRefreshCacheFromDiskWorks(t *testing.T) {
-	tempFile, err := ioutil.TempFile(os.TempDir(), "clouddetect_test")
+	tempFile, err := ioutil.TempFile(os.TempDir(), "clouddetect_test_multiprocess")
 	if err != nil {
 		t.Errorf("Could not create temp file for cache output: %v", err)
 		return
@@ -146,7 +151,7 @@ func TestThatMultiProcessRefreshCacheFromDiskWorks(t *testing.T) {
 }
 
 func TestThatDeleteOldLockFileWorks(t *testing.T) {
-	tempFile, err := ioutil.TempFile(os.TempDir(), "clouddetect_test")
+	tempFile, err := ioutil.TempFile(os.TempDir(), "clouddetect_test_deleteoldlock")
 	if err != nil {
 		t.Errorf("Could not create temp file for cache output: %v", err)
 		return
@@ -155,7 +160,7 @@ func TestThatDeleteOldLockFileWorks(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	defer tempFile.Close()
 
-	client := DefaultClient()
+	client := NewClient(12 * time.Hour)
 	client.CacheFilePath = tempFile.Name()
 
 	f, err := os.OpenFile(client.lockFilePath(), os.O_RDONLY|os.O_CREATE, os.ModePerm)
@@ -190,8 +195,8 @@ func TestThatDeleteOldLockFileWorks(t *testing.T) {
 	}
 }
 
-func TestThatRefreshCacheAsyncWorks(t *testing.T) {
-	tempFile, err := ioutil.TempFile(os.TempDir(), "clouddetect_test")
+func TestThatCacheRefreshTimeoutWorks(t *testing.T) {
+	tempFile, err := ioutil.TempFile(os.TempDir(), "clouddetect_test_refreshtimeout")
 	if err != nil {
 		t.Errorf("Could not create temp file for cache output: %v", err)
 		return
@@ -200,7 +205,41 @@ func TestThatRefreshCacheAsyncWorks(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 	defer tempFile.Close()
 
-	client := DefaultClient()
+	client := NewClient(12 * time.Hour)
+	client.CacheFilePath = tempFile.Name()
+	client.CacheRefreshTimeout = 3 * time.Second
+
+	f, err := os.OpenFile(client.lockFilePath(), os.O_RDONLY|os.O_CREATE, os.ModePerm)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	f.Close()
+	defer os.Remove(f.Name())
+
+	start := time.Now()
+	if err := client.RefreshCache(); err != nil {
+		t.Errorf("Could not complete cache refresh due to lock file, despite cache refresh timeout: %v", err)
+	} else {
+		if time.Since(start) < (3 * time.Second) {
+			t.Error("Cache refresh completed but didn't wait for the cache refresh timeout window")
+		} else {
+			t.Log("Successfully refreshed cache from web after cache refresh timeout window was exceeded")
+		}
+	}
+}
+
+func TestThatRefreshCacheAsyncWorks(t *testing.T) {
+	tempFile, err := ioutil.TempFile(os.TempDir(), "clouddetect_test_refreshasync")
+	if err != nil {
+		t.Errorf("Could not create temp file for cache output: %v", err)
+		return
+	}
+	// last-in, first-out
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	client := NewClient(12 * time.Hour)
 	client.CacheFilePath = tempFile.Name()
 
 	if err := client.RefreshCache(); err != nil {
@@ -222,12 +261,13 @@ func TestThatRefreshCacheAsyncWorks(t *testing.T) {
 	}
 
 	// Try to resolve an IP, which should trigger a cache refresh
-	time.Sleep(1 * time.Second) // ensure we will get different refresh timestamps
 	tc := testCases[0]
 	ip := net.ParseIP(tc.ip)
 	client.Resolve(ip)
 
 	start := time.Now()
+	// Ensure the async refresh has a chance to kick off
+	time.Sleep(1 * time.Second)
 	for client.cacheRefreshInProgress {
 		time.Sleep(1 * time.Second)
 		if time.Since(start) > (30 * time.Second) {
@@ -236,9 +276,57 @@ func TestThatRefreshCacheAsyncWorks(t *testing.T) {
 		}
 	}
 
-	if client.cacheWriteTime.After(originalModTime) {
+	if client.cacheWriteTime.Unix() == originalModTime.Unix() {
 		t.Log("Successfully refreshed cache asynchronously as part of the client.Resolve() call")
 	} else {
-		t.Errorf("Asynchronously refreshed cache, but the cacheWriteTime (%v) is not more recent than originalModTime (%v)", client.cacheWriteTime, originalModTime)
+		t.Errorf("Asynchronously refreshed cache, but the cacheWriteTime (%v) is not the originalModTime (%v), which it should be because the cache should be reloaded from disk when not expired", client.cacheWriteTime, originalModTime)
 	}
+}
+
+func TestThatMultipleRefreshCacheCallsError(t *testing.T) {
+	tempFile, err := ioutil.TempFile(os.TempDir(), "clouddetect_test_multiplerefresh")
+	if err != nil {
+		t.Errorf("Could not create temp file for cache output: %v", err)
+		return
+	}
+	// last-in, first-out
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	client := NewClient(12 * time.Hour)
+	client.CacheFilePath = tempFile.Name()
+
+	wg := sync.WaitGroup{}
+
+	wg.Add(1)
+	var refreshErr error
+	go func() {
+		refreshErr = client.RefreshCache()
+		wg.Done()
+	}()
+
+	wg.Add(1)
+	var secondRefreshErr error
+	go func() {
+		// Try to ensure this runs second
+		time.Sleep(1 * time.Millisecond)
+		secondRefreshErr = client.RefreshCache()
+		wg.Done()
+	}()
+
+	wg.Wait()
+	if refreshErr != nil {
+		t.Errorf("Initial cache refresh triggered an error: %v", refreshErr)
+		return
+	}
+	if secondRefreshErr == nil {
+		t.Error("Second cache refresh call did not trigger an error")
+		return
+	}
+	if secondRefreshErr != ErrCacheRefreshInProgress {
+		t.Errorf("Second cache refresh triggered an error other than ErrCacheRefreshInProgress: %v", secondRefreshErr)
+		return
+	}
+
+	t.Log("Successfully received an ErrCacheRefreshInProgress error on second call to client.RefreshCache()")
 }
